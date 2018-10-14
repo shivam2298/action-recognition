@@ -5,6 +5,7 @@ import re
 from tensorflow.python.client import device_lib
 print(device_lib.list_local_devices())
 from keras.applications.inception_v3 import InceptionV3
+from keras.applications.inception_resnet_v2 import InceptionResNetV2
 from keras.preprocessing import image
 from keras.models import Model
 from keras import backend as K
@@ -31,13 +32,13 @@ from keras.regularizers import l2
 
 
 sess = tf.Session(config=tf.ConfigProto(log_device_placement=True))
-inception_v3 = InceptionV3(include_top=False, weights='imagenet', input_tensor=None, pooling=None)
+inception_v2 = InceptionResNetV2(include_top=False)
 model = Sequential()
-model.add(inception_v3)
+model.add(inception_v2)
 print (model.summary())
 
 print ("----------------------------import and model download done")
-
+exit()
 def get_image(imgpath):
     desired_size = 299
     im_pth = imgpath
@@ -62,10 +63,12 @@ def get_image(imgpath):
 
 def build_model(maxlen):
 	input_videos = Input((maxlen,2048), dtype='float32')
-	X = LSTM(128, return_sequences=False,W_regularizer=l2(0.001), recurrent_dropout=0.5)(input_videos)
-	# X = Dropout(0.5)(X)
-	# X = LSTM(256, return_sequences=False,recurrent_dropout=0.5)(X)
-	# X = Dropout(0.5)(X)
+	X = LSTM(256, return_sequences=True,W_regularizer=l2(0.001), recurrent_dropout=0.5)(input_videos)
+	X = Dropout(0.5)(X)
+	X = LSTM(256, return_sequences=True,W_regularizer=l2(0.001), recurrent_dropout=0.5)(X)
+	X = Dropout(0.5)(X)
+	X = LSTM(256, return_sequences=False,recurrent_dropout=0.5)(X)
+	X = Dropout(0.5)(X)
 	X = Dense(20)(X)
 	X = Activation('softmax')(X)
     
@@ -92,11 +95,16 @@ def name_process(name):
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 #dataset preparation code
 
-"""
+
 directory = 'VideosCrop'
 
-X = []
-y = []
+X_train = []
+y_train = []
+X_val = []
+y_val = []
+X_test = []
+y_test = []
+
 
 print ("computing features............")
 
@@ -107,6 +115,8 @@ for action_folder in os.listdir(directory):
 	if (action_num<1 or action_num>20):
 		print ("error")
 		break
+	X = []
+	y = []
 	path = directory+'/'+action_folder
 	video_count_for_curact = 0
 	for frame_folder_num, frame_folder in enumerate(os.listdir(path)):
@@ -137,40 +147,62 @@ for action_folder in os.listdir(directory):
 		print(np.array(one_video).shape)
     
 	y.extend([action_num-1]*video_count_for_curact)
-print (np.array(X).shape)
+	
+	X = np.array(X)
+	y = np.array(y)
+
+	tot_size = y.shape[0]
+	train_size = int(0.8*tot_size)
+	X_train.extend(X[:train_size,:,:])
+	y_train.extend(y[:train_size])
+	test_size = (tot_size-train_size)//2
+	X_test.extend(X[train_size:train_size+test_size,:,:])
+	y_test.extend(y[train_size:train_size+test_size])
+	X_val.extend(X[train_size+test_size:,:,:])
+	y_val.extend(y[train_size+test_size:])
 
 
-encoded_y = to_categorical(y,20)
-print ("encoded y _ ",encoded_y.shape)
-print (encoded_y[0])
-np.save('X.npy', np.array(X))
-np.save('encoded_y.npy',encoded_y)
-"""
 
+
+
+encoded_y_train = to_categorical(y_train,20)
+encoded_y_test = to_categorical(y_test,20)
+encoded_y_val = to_categorical(y_val,20)
+
+X_train = np.array(X_train)
+X_test = np.array(X_test)
+X_val = np.array(X_val)
+
+print (X_train.shape)
+print (encoded_y_train.shape)
+print (X_test.shape)
+print (encoded_y_test.shape)
+print (X_val.shape)
+print (encoded_y_val.shape)
 #----------------------------------------------------------------------
 #lstm training code
 """
 X = np.load("X.npy")
 encoded_y = np.load("encoded_y.npy")
-
+"""
 print ("build lstm model and training ..........")
 lstm_model = build_model(10)
 
 lstm_model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
-X_train,X_test,Y_train,Y_test = train_test_split(np.array(X),encoded_y,shuffle = True,test_size = 0.10)
-filepath = "models/weights-improvement-{epoch:02d}-{val_acc:.2f}.hdf5"
-callbacks = [ 
-	 ModelCheckpoint(filepath, monitor='val_acc', verbose=0, save_best_only=True, mode='auto', period=1)
-	]
-history = lstm_model.fit(X_train, Y_train, callbacks = callbacks, validation_split=0.12, epochs = 150, batch_size = 45, shuffle=True)
-score = lstm_model.evaluate(X_test,Y_test,batch_size= 32)
+# X_train,X_test,Y_train,Y_test = train_test_split(np.array(X),encoded_y,shuffle = True,test_size = 0.10)
+# filepath = "models/weights-improvement-{epoch:02d}-{val_acc:.2f}.hdf5"
+# callbacks = [ 
+# 	 ModelCheckpoint(filepath, monitor='val_acc', verbose=0, save_best_only=True, mode='auto', period=1)
+# 	]
+history = lstm_model.fit(X_train, encoded_y_train, validation_data = (X_val,encoded_y_val), epochs = 250, batch_size = 45)
+score = lstm_model.evaluate(X_test,encoded_y_test,batch_size= 32)
 print (score)
-
+"""
 np.save('split/X_test.npy', np.array(X_test))
 np.save('split/Y_test.npy',Y_test)
 np.save('split/X_train.npy', np.array(X_train))
 np.save('split/Y_train.npy',Y_train)
-
+"""
 #graph of loss and acc
 
 print(history.history.keys())
@@ -201,3 +233,4 @@ X = np.load('split/X_test.npy')
 y = np.load('split/Y_test.npy')
 score = model.evaluate(X,y,batch_size= 32)
 print (score)
+"""
